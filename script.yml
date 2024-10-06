@@ -1,0 +1,67 @@
+stages:
+- stage: build
+  jobs: 
+  - job: Copy_files_from_source 
+    pool:
+      vmImage: 'windows-2019'
+
+    steps:
+    - script: |
+        # Load the last successful build time or set to a default value
+        if (Test-Path "$(Build.ArtifactStagingDirectory)\lastSuccessfulBuild.txt") {
+            $lastBuildTime = Get-Content "$(Build.ArtifactStagingDirectory)\lastSuccessfulBuild.txt"
+        } else {
+            $lastBuildTime = (Get-Date).AddDays(-1).ToString("o")  # Default to 1 day ago
+        }
+
+        # Define the S3 bucket name
+        $s3BucketName = "pipeline-demo-dest-bucket/demo-cloned"
+
+        # Get all modified or added files since the last build in C:\Temp\
+        $modifiedFiles = Get-ChildItem 'C:\Temp\' -Recurse | 
+                         Where-Object { $_.LastWriteTime -gt [DateTime]::Parse($lastBuildTime) }
+
+        # Copy the modified files to a local staging directory (optional)
+        foreach ($file in $modifiedFiles) {
+            $destination = Join-Path '$(Build.ArtifactStagingDirectory)' $file.FullName.Substring('C:\Temp\'.Length)
+            $destinationDir = Split-Path $destination -Parent
+            
+            # Create the directory if it doesn't exist
+            if (!(Test-Path $destinationDir)) {
+                New-Item -ItemType Directory -Path $destinationDir -Force
+            }
+            
+            # Copy the file to the local staging directory
+            Copy-Item $file.FullName -Destination $destination -Force -ErrorAction Stop
+            
+            # Upload to S3
+            $s3Key = $destination.Substring($(Build.ArtifactStagingDirectory).Length + 1).Replace('\', '/')
+            aws s3 cp $destination "s3://$s3BucketName/$s3Key" --acl private
+        }
+
+        # Save the current time as the last successful build time
+        (Get-Date).ToString("o") | Set-Content "$(Build.ArtifactStagingDirectory)\lastSuccessfulBuild.txt"
+      displayName: 'Copy Incremental Files to S3'
+      
+    - task: PublishBuildArtifacts@1
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+        ArtifactName: 'drop'
+        publishLocation: 'Container'
+
+- stage: Copyfiles
+  jobs:
+  - job: Deploy_file
+    pool:
+      vmImage: 'windows-latest'
+    steps:
+    - checkout: none
+    
+    - task: DownloadBuildArtifacts@0
+      inputs:
+        buildType: 'current'
+        downloadType: 'single'
+        artifactName: 'drop'
+        downloadPath: '$(System.ArtifactsDirectory)'
+
+    # S3 upload steps for different asset types can be added similarly
