@@ -1,0 +1,123 @@
+trigger:
+  branches:
+    include:
+    - main
+  paths:
+    include:
+    - ABC/HELP_TDF_Storage_Accounts/sabcd/**
+
+stages:
+- stage: build
+  jobs: 
+  - job: Copy_files_from_source 
+    pool:
+      vmImage: 'windows-2019'
+
+    steps:
+    - script: |
+        echo "Fetching changed files from Azure DevOps REST API..."
+        curl -u $(System.AccessToken): \
+          -X GET \
+          "https://dev.azure.com/$(System.CollectionUri)/$(System.TeamProject)/_apis/git/repositories/$(Build.Repository.Name)/commits/$(Build.SourceVersion)/changes?api-version=6.0" \
+          > changes.json
+
+        echo "Parsing changed files..."
+        jq -r '.changes[] | select(.item.path | startswith("/ABC/HELP_TDF_Storage_Accounts/sabcd/")) | .item.path' changes.json > changed_files.txt
+      displayName: 'Get Changed Files'
+
+    - task: CopyFiles@2
+      inputs:
+        SourceFolder: '$(Build.Repository.LocalPath)/KMC/JoyConnect_TDF_Storage_Accounts/sxsaabsxingestxsc'
+        Contents: '@changed_files.txt'
+        TargetFolder: '$(Build.ArtifactStagingDirectory)'
+        CleanTargetFolder: true
+        OverWrite: true
+
+    - task: PublishBuildArtifacts@1
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+        ArtifactName: 'drop'
+        publishLocation: 'Container'
+ 
+- stage: Copyfiles
+  jobs:
+  - job: Deploy_file
+    pool:
+      vmImage: 'windows-latest'
+    steps:
+    - checkout: none
+    
+    - task: DownloadBuildArtifacts@0
+      inputs:
+        buildType: 'current'
+        downloadType: 'single'
+        artifactName: 'drop'
+        downloadPath: '$(System.ArtifactsDirectory)'
+
+    - script: |
+        echo "Reading changed files and copying to Azure Blob Storage..."
+        for /F "tokens=*" %%i in (changed_files.txt) do (
+          echo Copying %%i
+          setlocal enabledelayedexpansion
+          set "filePath=%%i"
+          
+          REM Extract the container name from the file path
+          for %%j in ("!filePath!") do (
+            set "containerName=%%~nj"
+          )
+
+          REM Define the storage account name
+          set "storageAccount=sxsaabsxingestxsc"
+
+          REM Copy the file to the corresponding Azure Blob container
+          azcopy copy "$(System.ArtifactsDirectory)\drop\!filePath!" "https://!storageAccount!.blob.core.windows.net/!containerName!/!filePath!"
+        )
+      displayName: 'Copy Changed Files to Azure Blob'
+
+    - task: AzureFileCopy@4
+      inputs:
+        SourcePath: '$(System.ArtifactsDirectory)\drop\10sc32-01222\tdf'
+        azureSubscription: 'Temp-AzureClouderaServicePrincipal'
+        Destination: 'AzureBlob'
+        storage: 'sxsaabsxingestxsc'
+        ContainerName: '10sc32-01222'
+
+    - task: AzureFileCopy@4
+      inputs:
+        SourcePath: '$(System.ArtifactsDirectory)\drop\10sc32-01020\tdf'
+        azureSubscription: 'Temp-AzureClouderaServicePrincipal'
+        Destination: 'AzureBlob'
+        storage: 'sxsaabsxingestxsc'
+        ContainerName: '10sc32-01020'
+
+    - task: AzureFileCopy@4
+      inputs:
+        SourcePath: '$(System.ArtifactsDirectory)\drop\10sc32-01021\tdf'
+        azureSubscription: 'Temp-AzureClouderaServicePrincipal'
+        Destination: 'AzureBlob'
+        storage: 'sxsaabsxingestxsc'
+        ContainerName: '10sc32-01021'
+
+    - task: AzureFileCopy@4
+      inputs:
+        SourcePath: '$(System.ArtifactsDirectory)\drop\10sc32-01022\tdf'
+        azureSubscription: 'Temp-AzureClouderaServicePrincipal'
+        Destination: 'AzureBlob'
+        storage: 'sxsaabsxingestxsc'
+        ContainerName: '10sc32-01022'
+
+    - task: AzureFileCopy@4
+      inputs:
+        SourcePath: '$(System.ArtifactsDirectory)\drop\10sc32-01070\tdf'
+        azureSubscription: 'Temp-AzureClouderaServicePrincipal'
+        Destination: 'AzureBlob'
+        storage: 'sxsaabsxingestxsc'
+        ContainerName: '10sc32-01070'
+
+    - task: AzureFileCopy@4
+      inputs:
+        SourcePath: '$(System.ArtifactsDirectory)\drop\10sc32-01178\tdf'
+        azureSubscription: 'Temp-AzureClouderaServicePrincipal'
+        Destination: 'AzureBlob'
+        storage: 'sxsaabsxingestxsc'
+        ContainerName: '10sc32-01178'
